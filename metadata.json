@@ -2,5 +2,5 @@
   "name": "GlucoBridge — گلوکو برج",
   "description": "Patient-facing diabetes self-monitoring platform for rural Pakistani patients with low digital literacy.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

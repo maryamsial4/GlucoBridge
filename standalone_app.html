@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ur" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GlucoBridge — گلوکو برج</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans Arabic', sans-serif;
+            background-color: #f8fafc;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .rtl { direction: rtl; }
+        .ltr { direction: ltr; }
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .animate-slide-up { animation: slideUp 0.4s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-900 overflow-x-hidden">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // DB Setup
+        const db = new Dexie("StandaloneGlucoBridge");
+        db.version(1).stores({
+            readings: "++id, value, type, timestamp, status",
+            profile: "id"
+        });
+
+        // Icons Utility
+        const Icon = ({ name, className }) => {
+            useEffect(() => {
+                lucide.createIcons();
+            }, [name]);
+            return <i data-lucide={name} className={className}></i>;
+        };
+
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [readings, setReadings] = useState([]);
+            const [patient, setPatient] = useState({ name: "آپ کا نام", city: "پاکستان" });
+
+            useEffect(() => {
+                const loadData = async () => {
+                    const allReadings = await db.readings.orderBy('timestamp').reverse().toArray();
+                    setReadings(allReadings);
+                    const savedProfile = await db.profile.get(1);
+                    if (savedProfile) setPatient(savedProfile);
+                };
+                loadData();
+            }, []);
+
+            const addReading = async (val, type) => {
+                let status = "Normal";
+                const v = parseInt(val);
+                if (type === 'Fasting') {
+                    if (v < 70) status = "Low (خطرہ)";
+                    else if (v > 130) status = "High (خطرہ)";
+                } else {
+                    if (v < 100) status = "Low (خطرہ)";
+                    else if (v > 180) status = "High (خطرہ)";
+                }
+
+                const newReading = {
+                    value: v,
+                    type,
+                    timestamp: Date.now(),
+                    status
+                };
+                await db.readings.add(newReading);
+                setReadings(prev => [newReading, ...prev]);
+            };
+
+            return (
+                <div className="max-w-md mx-auto min-h-screen flex flex-col pb-24">
+                    {/* Header */}
+                    <header className="p-6 pt-8">
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <h1 className="text-2xl font-black text-teal-600 tracking-tight">GlucoBridge</h1>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Diabetes Care</p>
+                            </div>
+                            <div className="bg-teal-100 p-2 rounded-full text-teal-600">
+                                <Icon name="user" className="w-6 h-6" />
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Main Content */}
+                    <main className="flex-1 px-6">
+                        {activeTab === 'dashboard' && <Dashboard readings={readings} onAdd={addReading} />}
+                        {activeTab === 'history' && <History readings={readings} />}
+                        {activeTab === 'profile' && <Profile patient={patient} />}
+                    </main>
+
+                    {/* Navigation */}
+                    <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/80 backdrop-blur-xl border-t border-slate-100 flex justify-around p-4 z-50">
+                        <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1 ${activeTab === 'dashboard' ? 'text-teal-600' : 'text-slate-400'}`}>
+                            <Icon name="home" className="w-6 h-6" />
+                            <span className="text-[10px] font-bold">ہوم</span>
+                        </button>
+                        <button onClick={() => setActiveTab('history')} className={`flex flex-col items-center gap-1 ${activeTab === 'history' ? 'text-teal-600' : 'text-slate-400'}`}>
+                            <Icon name="activity" className="w-6 h-6" />
+                            <span className="text-[10px] font-bold">ہسٹری</span>
+                        </button>
+                        <button onClick={() => setActiveTab('profile')} className={`flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-teal-600' : 'text-slate-400'}`}>
+                            <Icon name="settings" className="w-6 h-6" />
+                            <span className="text-[10px] font-bold">ترتیبات</span>
+                        </button>
+                    </nav>
+                </div>
+            );
+        };
+
+        const Dashboard = ({ readings, onAdd }) => {
+            const [val, setVal] = useState('');
+            const [type, setType] = useState('Fasting');
+
+            const latest = readings[0];
+
+            return (
+                <div className="space-y-6 animate-slide-up">
+                    {/* Welcome Card */}
+                    <div className="bg-teal-600 rounded-[32px] p-8 text-white shadow-xl shadow-teal-900/10 relative overflow-hidden">
+                        <h2 className="text-2xl font-bold mb-2">السلام علیکم!</h2>
+                        <p className="text-teal-50 opacity-90 text-sm mb-6">آج اپنی شوگر چیک کریں اور ریکارڈ رکھیں۔</p>
+                        
+                        {latest && (
+                            <div className="bg-white/10 rounded-2xl p-4 backdrop-blur-md">
+                                <p className="text-[10px] font-bold uppercase tracking-widest opacity-60">آخری رپورٹ</p>
+                                <div className="flex items-baseline gap-2">
+                                    <span className="text-4xl font-black">{latest.value}</span>
+                                    <span className="text-sm font-bold opacity-80">mg/dL</span>
+                                </div>
+                                <div className="mt-2 inline-block px-3 py-1 bg-white/20 rounded-full text-[10px] font-bold">
+                                    {latest.status}
+                                </div>
+                            </div>
+                        )}
+                        <div className="absolute top-[-20px] right-[-20px] w-40 h-40 bg-teal-400/20 rounded-full blur-3xl"></div>
+                    </div>
+
+                    {/* Quick Entry */}
+                    <div className="bg-white rounded-[32px] p-8 shadow-sm border border-slate-100">
+                        <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-teal-500 rounded-full"></span>
+                            نئی انٹری کریں
+                        </h3>
+                        
+                        <div className="space-y-6">
+                            <div className="flex gap-2">
+                                <button 
+                                    onClick={() => setType('Fasting')}
+                                    className={`flex-1 py-3 rounded-2xl text-xs font-black transition-all ${type === 'Fasting' ? 'bg-teal-50 text-teal-600 ring-2 ring-teal-500' : 'bg-slate-50 text-slate-400'}`}
+                                >
+                                    Fasting (نہار منہ)
+                                </button>
+                                <button 
+                                    onClick={() => setType('Random')}
+                                    className={`flex-1 py-3 rounded-2xl text-xs font-black transition-all ${type === 'Random' ? 'bg-teal-50 text-teal-600 ring-2 ring-teal-500' : 'bg-slate-50 text-slate-400'}`}
+                                >
+                                    Random (کھانے کے بعد)
+                                </button>
+                            </div>
+
+                            <div className="relative">
+                                <input 
+                                    type="number" 
+                                    placeholder="Sugar level (e.g. 120)"
+                                    value={val}
+                                    onChange={(e) => setVal(e.target.value)}
+                                    className="w-full bg-slate-50 border-none rounded-2xl p-5 text-center text-3xl font-black text-teal-600 focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-200"
+                                />
+                                <div className="absolute right-6 top-1/2 -translate-y-1/2 text-xs font-black text-slate-300">mg/dL</div>
+                            </div>
+
+                            <button 
+                                onClick={() => {
+                                    if(!val) return;
+                                    onAdd(val, type);
+                                    setVal('');
+                                }}
+                                className="w-full bg-slate-900 text-white py-5 rounded-[24px] font-black text-lg active:scale-95 transition-all shadow-lg flex items-center justify-center gap-3"
+                            >
+                                <Icon name="plus-circle" className="w-6 h-6" />
+                                محفوظ کریں
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const History = ({ readings }) => {
+            return (
+                <div className="space-y-6 animate-slide-up">
+                    <h2 className="text-2xl font-black text-slate-800">شوگر ہسٹری</h2>
+                    
+                    {readings.length === 0 ? (
+                        <div className="text-center py-20 text-slate-300">
+                            <Icon name="inbox" className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                            <p className="font-bold">ابھی کوئی ریکارڈ نہیں ہے</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {readings.map(r => (
+                                <div key={r.id} className="bg-white p-5 rounded-3xl flex items-center justify-between shadow-sm border border-slate-50">
+                                    <div className="flex items-center gap-4">
+                                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black ${
+                                            r.status.includes('Low') ? 'bg-orange-50 text-orange-500' : 
+                                            r.status.includes('High') ? 'bg-red-50 text-red-500' : 'bg-teal-50 text-teal-500'
+                                        }`}>
+                                            {r.value}
+                                        </div>
+                                        <div>
+                                            <p className="text-xs font-black text-slate-800">{r.type}</p>
+                                            <p className="text-[10px] text-slate-400 font-bold">{new Date(r.timestamp).toLocaleTimeString('ur-PK')}</p>
+                                        </div>
+                                    </div>
+                                    <div className={`text-[10px] font-black px-3 py-1 rounded-full ${
+                                        r.status.includes('Low') ? 'bg-orange-100 text-orange-600' : 
+                                        r.status.includes('High') ? 'bg-red-100 text-red-600' : 'bg-teal-100 text-teal-600'
+                                    }`}>
+                                        {r.status}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const Profile = ({ patient }) => {
+            return (
+                <div className="space-y-6 animate-slide-up">
+                    <h2 className="text-2xl font-black text-slate-800">آپ کی پروفائل</h2>
+                    <div className="bg-white rounded-[32px] p-8 shadow-sm border border-slate-100 text-center">
+                        <div className="w-24 h-24 bg-teal-100 rounded-full mx-auto flex items-center justify-center text-teal-600 mb-4">
+                            <Icon name="user" className="w-12 h-12" />
+                        </div>
+                        <h3 className="text-xl font-black text-slate-800">{patient.name}</h3>
+                        <p className="text-slate-400 font-bold text-sm tracking-wide mb-8">{patient.city}</p>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-slate-50 p-4 rounded-2xl text-center">
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">ٹائپ</p>
+                                <p className="text-sm font-bold text-slate-800">Diabetes Type 2</p>
+                            </div>
+                            <div className="bg-slate-50 p-4 rounded-2xl text-center">
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">ممبر شپ</p>
+                                <p className="text-sm font-bold text-slate-800">Free</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

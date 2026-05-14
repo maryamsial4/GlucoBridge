@@ -1,35 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MessageCircle, X, Send, User, Bot, Sparkles } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import { MessageCircle, X, Send, Bot, Sparkles } from 'lucide-react';
 import { db, ChatMessage } from '../utils/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn } from '../lib/utils';
 import { getTriage } from '../utils/triage';
-
-let aiInstance: GoogleGenAI | null = null;
-
-function getAI() {
-  if (!aiInstance) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY is missing. Please configure it in AI Studio Secrets.');
-    }
-    aiInstance = new GoogleGenAI({ apiKey });
-  }
-  return aiInstance;
-}
-
-const SYSTEM_PROMPT = `You are GlucoBridge Assistant, a friendly diabetes health guide for Pakistani patients. 
-Rules: 
-1) Answer ONLY diabetes-related questions. 
-2) Respond in simple Urdu mixed with English medical terms. 
-3) Keep answers under 4 sentences. 
-4) Never diagnose. 
-5) For serious symptoms, always say 'ڈاکٹر سے فوری ملیں'. 
-6) Be warm and encouraging. 
-7) DO NOT say 'Welcome' or 'Kushamuddin' in every text. ONLY greet the user if it's the very first message.
-8) If user sends a number, interpret it as a glucose reading and give triage advice.`;
 
 const QUICK_QUESTIONS = [
   "شوگر کیا ہے؟", 
@@ -67,7 +42,6 @@ export default function ChatBot() {
     setIsTyping(true);
 
     try {
-      const ai = getAI();
       // Basic triage check for numbers
       const numMatch = text.match(/\d+/);
       let dynamicContext = "";
@@ -79,13 +53,10 @@ export default function ChatBot() {
         }
       }
 
-      // Ensure alternating roles and limit history to last 8 messages
-      // This prevents the API from failing due to non-alternating roles or exceeding context
+      // Ensure alternating roles and limit history
       const formattedHistory: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
       let lastRole: 'user' | 'model' | null = null;
-
-      // Filter and pick last few valid messages
-      const recentHistory = chatHistory.slice(-10);
+      const recentHistory = chatHistory.slice(-4);
       
       for (const h of recentHistory) {
         const role = h.role === 'assistant' ? 'model' : 'user';
@@ -98,36 +69,37 @@ export default function ChatBot() {
         }
       }
 
-      // If the last message in history is 'user', we might have a conflict 
-      // because we are about to add another 'user' message. 
-      // So we make sure the history ends with 'model' or is empty.
       if (formattedHistory.length > 0 && formattedHistory[formattedHistory.length - 1].role === 'user') {
         formattedHistory.pop();
       }
 
-      const result = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          ...formattedHistory,
-          { role: 'user', parts: [{ text: text + dynamicContext }] }
-        ],
-        config: {
-          systemInstruction: SYSTEM_PROMPT
-        }
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text + dynamicContext,
+          history: formattedHistory
+        })
       });
-      
-      const botText = result.text || "معذرت، ابھی رابطہ نہیں ہو پا رہا۔";
+
+      if (!response.ok) throw new Error('API_ERROR');
+      const data = await response.json();
+      const botText = data.text || "معذرت، ابھی رابطہ نہیں ہو پا رہا۔";
 
       await db.chatHistory.add({
         role: 'assistant',
         message: botText,
         timestamp: Date.now()
       });
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      console.error("AI Error:", error);
+      const errorMsg = error?.message === 'TIMEOUT' 
+        ? "معذرت، جواب آنے میں بہت دیر ہو رہی ہے۔ دوبارہ کوشش کریں۔"
+        : "معذرت، ابھی رابطہ نہیں ہو پا رہا۔ انٹرنیٹ چیک کریں۔";
+      
       await db.chatHistory.add({
         role: 'assistant',
-        message: "معذرت، ابھی رابطہ نہیں ہو پا رہا۔ انٹرنیٹ چیک کریں۔",
+        message: errorMsg,
         timestamp: Date.now()
       });
     } finally {
